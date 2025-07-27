@@ -351,18 +351,25 @@ def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Turnstile API Server")
 
-    # 【修改点 3】: 新增 --no-sandbox 命令行参数
+    # 【已修复】新增 --no-sandbox 参数
     parser.add_argument('--no-sandbox', action='store_true', help='(For Colab/Docker) Add --no-sandbox flag to browser launch arguments.')
-    parser.add_argument('--headless', type=bool, default=False, help='Run the browser in headless mode, without opening a graphical interface. This option requires the --useragent argument to be set (default: False)')
-    parser.add_argument('--useragent', type=str, default=None, help='Specify a custom User-Agent string for the browser. If not provided, the default User-Agent is used')
-    parser.add_argument('--debug', type=bool, default=False, help='Enable or disable debug mode for additional logging and troubleshooting information (default: False)')
-    parser.add_argument('--browser_type', type=str, default='chromium', help='Specify the browser type for the solver. Supported options: chromium, chrome, msedge, camoufox (default: chromium)')
-    parser.add_argument('--thread', type=int, default=1, help='Set the number of browser threads to use for multi-threaded mode. Increasing this will speed up execution but requires more resources (default: 1)')
-    parser.add_argument('--proxy', type=bool, default=False, help='Enable proxy support for the solver (Default: False)')
-    parser.add_argument('--host', type=str, default='127.0.0.1', help='Specify the IP address where the API solver runs. (Default: 127.0.0.1)')
-    parser.add_argument('--port', type=str, default='5000', help='Set the port for the API solver to listen on. (Default: 5000)')
+    
+    # 【已修复】将 headless 的类型从 bool 改为更灵活的 str, 以支持 'new'
+    parser.add_argument('--headless', type=str, default='False', help="Run in headless mode. Use 'True', 'False', or 'new'. (Default: 'False')")
+    
+    parser.add_argument('--useragent', type=str, default=None, help='Specify a custom User-Agent string for the browser.')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode for additional logging.')
+    parser.add_argument('--browser_type', type=str, default='camoufox', help='Specify the browser type. (Default: camoufox)')
+    parser.add_argument('--thread', type=int, default=1, help='Set the number of browser threads to use.')
+    
+    # 【核心修复】将 --proxy 的类型从 bool 改为 action='store_true'
+    # 这样只要命令中出现 --proxy，它的值就是 True，不再需要跟一个参数。
+    parser.add_argument('--proxy', action='store_true', help='Enable proxy support from proxies.txt.')
+    
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='IP address for the API solver to run on.')
+    parser.add_argument('--port', type=str, default='5000', help='Port for the API solver to listen on.')
+    
     return parser.parse_args()
-
 
 # 【修改点 4】: 在 create_app 函数签名中增加 no_sandbox
 def create_app(headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool, no_sandbox: bool) -> Quart:
