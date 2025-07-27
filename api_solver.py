@@ -1,4 +1,3 @@
-
 import os
 import sys
 import time
@@ -81,8 +80,9 @@ class TurnstileAPIServer:
     </body>
     </html>
     """
-
-    def __init__(self, headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool):
+    
+    # 【修改点 1】: 在 __init__ 方法中增加一个 no_sandbox 参数
+    def __init__(self, headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool, no_sandbox: bool):
         self.app = Quart(__name__)
         self.debug = debug
         self.results = self._load_results()
@@ -95,6 +95,9 @@ class TurnstileAPIServer:
         self.browser_args = []
         if useragent:
             self.browser_args.append(f"--user-agent={useragent}")
+        # 如果 no_sandbox 为 True, 就把 '--no-sandbox' 添加到启动参数列表里
+        if no_sandbox:
+            self.browser_args.append('--no-sandbox')
 
         self._setup_routes()
 
@@ -135,11 +138,13 @@ class TurnstileAPIServer:
 
     async def _initialize_browser(self) -> None:
         """Initialize the browser and create the page pool."""
-
+        
+        # 【修改点 2】: 在启动 Camoufox 时，把 self.browser_args 传递进去
         if self.browser_type in ['chromium', 'chrome', 'msedge']:
             playwright = await async_playwright().start()
         elif self.browser_type == "camoufox":
-            camoufox = AsyncCamoufox(headless=self.headless)
+            # Camoufox 的初始化现在也接收 args
+            camoufox = AsyncCamoufox(headless=self.headless, args=self.browser_args)
 
         for _ in range(self.thread_count):
             if self.browser_type in ['chromium', 'chrome', 'msedge']:
@@ -150,6 +155,7 @@ class TurnstileAPIServer:
                 )
 
             elif self.browser_type == "camoufox":
+                # Camoufox 的 .start() 不需要额外参数，因为已经在初始化时传递了
                 browser = await camoufox.start()
 
             await self.browser_pool.put((_+1, browser))
@@ -176,13 +182,20 @@ class TurnstileAPIServer:
 
             if proxy:
                 parts = proxy.split(':')
-                if len(parts) == 3:
-                    context = await browser.new_context(proxy={"server": f"{proxy}"})
-                elif len(parts) == 5:
-                    proxy_scheme, proxy_ip, proxy_port, proxy_user, proxy_pass = parts
-                    context = await browser.new_context(proxy={"server": f"{proxy_scheme}://{proxy_ip}:{proxy_port}", "username": proxy_user, "password": proxy_pass})
+                # 修正了代理格式解析逻辑，以支持 user:pass@host:port
+                if '@' in proxy: # 包含认证信息
+                    auth, loc = proxy.split('@')
+                    user, password = auth.split(':')
+                    host, port = loc.split(':')
+                    # 假设协议是 http，可以根据需要修改
+                    server_url = f"http://{host}:{port}"
+                    context = await browser.new_context(proxy={"server": server_url, "username": user, "password": password})
+                elif len(parts) == 2: # 只有 host:port
+                    host, port = parts
+                    server_url = f"http://{host}:{port}"
+                    context = await browser.new_context(proxy={"server": server_url})
                 else:
-                    raise ValueError("Invalid proxy format")
+                    raise ValueError("Invalid proxy format in proxies.txt. Use host:port or user:pass@host:port.")
             else:
                 context = await browser.new_context()
         else:
@@ -334,11 +347,12 @@ class TurnstileAPIServer:
             </html>
         """
 
-
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Turnstile API Server")
 
+    # 【修改点 3】: 新增 --no-sandbox 命令行参数
+    parser.add_argument('--no-sandbox', action='store_true', help='(For Colab/Docker) Add --no-sandbox flag to browser launch arguments.')
     parser.add_argument('--headless', type=bool, default=False, help='Run the browser in headless mode, without opening a graphical interface. This option requires the --useragent argument to be set (default: False)')
     parser.add_argument('--useragent', type=str, default=None, help='Specify a custom User-Agent string for the browser. If not provided, the default User-Agent is used')
     parser.add_argument('--debug', type=bool, default=False, help='Enable or disable debug mode for additional logging and troubleshooting information (default: False)')
@@ -350,8 +364,10 @@ def parse_args():
     return parser.parse_args()
 
 
-def create_app(headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool) -> Quart:
-    server = TurnstileAPIServer(headless=headless, useragent=useragent, debug=debug, browser_type=browser_type, thread=thread, proxy_support=proxy_support)
+# 【修改点 4】: 在 create_app 函数签名中增加 no_sandbox
+def create_app(headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool, no_sandbox: bool) -> Quart:
+    # 把 no_sandbox 传递给 TurnstileAPIServer 的构造函数
+    server = TurnstileAPIServer(headless=headless, useragent=useragent, debug=debug, browser_type=browser_type, thread=thread, proxy_support=proxy_support, no_sandbox=no_sandbox)
     return server.app
 
 
@@ -368,5 +384,6 @@ if __name__ == '__main__':
     elif args.headless is True and args.useragent is None and "camoufox" not in args.browser_type:
         logger.error(f"You must specify a {COLORS.get('YELLOW')}User-Agent{COLORS.get('RESET')} for Turnstile Solver or use {COLORS.get('GREEN')}camoufox{COLORS.get('RESET')} without useragent")
     else:
-        app = create_app(headless=args.headless, debug=args.debug, useragent=args.useragent, browser_type=args.browser_type, thread=args.thread, proxy_support=args.proxy)
+        # 【修改点 5】: 把解析到的 no_sandbox 参数传递给 create_app
+        app = create_app(headless=args.headless, debug=args.debug, useragent=args.useragent, browser_type=args.browser_type, thread=args.thread, proxy_support=args.proxy, no_sandbox=args.no_sandbox)
         app.run(host=args.host, port=int(args.port))
