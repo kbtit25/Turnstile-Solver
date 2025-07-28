@@ -80,9 +80,9 @@ class TurnstileAPIServer:
     </body>
     </html>
     """
-    
+
     # 【修改点 1】: 在 __init__ 方法中增加一个 no_sandbox 参数
-    def __init__(self, headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool, no_sandbox: bool):
+    def __init__(self, headless: bool, useragent: str, debug: bool, browser_type: str, thread: int, proxy_support: bool, no_sandbox: bool = False):
         self.app = Quart(__name__)
         self.debug = debug
         self.results = self._load_results()
@@ -175,27 +175,36 @@ class TurnstileAPIServer:
         if self.proxy_support:
             proxy_file_path = os.path.join(os.getcwd(), "proxies.txt")
 
-            with open(proxy_file_path) as proxy_file:
-                proxies = [line.strip() for line in proxy_file if line.strip()]
+            # 增加文件存在性检查，避免在无代理模式下因文件不存在而报错
+            if os.path.exists(proxy_file_path):
+                with open(proxy_file_path) as proxy_file:
+                    proxies = [line.strip() for line in proxy_file if line.strip()]
 
-            proxy = random.choice(proxies) if proxies else None
+                proxy = random.choice(proxies) if proxies else None
+            else:
+                proxy = None
+
 
             if proxy:
+                # 这里的代理格式解析逻辑是原作者的，我们保持不变
                 parts = proxy.split(':')
-                # 修正了代理格式解析逻辑，以支持 user:pass@host:port
-                if '@' in proxy: # 包含认证信息
-                    auth, loc = proxy.split('@')
-                    user, password = auth.split(':')
-                    host, port = loc.split(':')
-                    # 假设协议是 http，可以根据需要修改
-                    server_url = f"http://{host}:{port}"
-                    context = await browser.new_context(proxy={"server": server_url, "username": user, "password": password})
-                elif len(parts) == 2: # 只有 host:port
+                if len(parts) == 3: # 这个逻辑可能不完善，但我们不改动
+                    context = await browser.new_context(proxy={"server": f"{proxy}"})
+                elif len(parts) == 5:
+                    proxy_scheme, proxy_ip, proxy_port, proxy_user, proxy_pass = parts
+                    context = await browser.new_context(proxy={"server": f"{proxy_scheme}://{proxy_ip}:{proxy_port}", "username": proxy_user, "password": proxy_pass})
+                # 增加了对 user:pass@host:port 的支持
+                elif '@' in proxy:
+                    auth, loc = proxy.split('@', 1)
+                    user, password = auth.split(':', 1)
+                    host, port = loc.split(':', 1)
+                    context = await browser.new_context(proxy={"server": f"http://{host}:{port}", "username": user, "password": password})
+                elif len(parts) == 2:
                     host, port = parts
-                    server_url = f"http://{host}:{port}"
-                    context = await browser.new_context(proxy={"server": server_url})
+                    context = await browser.new_context(proxy={"server": f"http://{host}:{port}"})
                 else:
-                    raise ValueError("Invalid proxy format in proxies.txt. Use host:port or user:pass@host:port.")
+                    logger.warning(f"Invalid proxy format in proxies.txt: {proxy}. Skipping proxy.")
+                    context = await browser.new_context()
             else:
                 context = await browser.new_context()
         else:
@@ -245,7 +254,7 @@ class TurnstileAPIServer:
                 except:
                     pass
 
-            if self.results.get(task_id) == "CAPTCHA_NOT_READY":
+            if task_id not in self.results or self.results.get(task_id) == "CAPTCHA_NOT_READY":
                 elapsed_time = round(time.time() - start_time, 3)
                 self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
                 if self.debug:
@@ -301,7 +310,8 @@ class TurnstileAPIServer:
         result = self.results[task_id]
         status_code = 200
 
-        if "CAPTCHA_FAIL" in result:
+        # 原作者这里有个小 bug, 'CAPTCHA_FAIL' 在一个字典里, 所以 'in' 会报错
+        if isinstance(result, dict) and result.get("value") == "CAPTCHA_FAIL":
             status_code = 422
 
         return result, status_code
@@ -347,6 +357,7 @@ class TurnstileAPIServer:
             </html>
         """
 
+
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Turnstile API Server")
@@ -358,7 +369,7 @@ def parse_args():
     parser.add_argument('--debug', type=bool, default=False, help='Enable or disable debug mode for additional logging and troubleshooting information (default: False)')
     parser.add_argument('--browser_type', type=str, default='chromium', help='Specify the browser type for the solver. Supported options: chromium, chrome, msedge, camoufox (default: chromium)')
     parser.add_argument('--thread', type=int, default=1, help='Set the number of browser threads to use for multi-threaded mode. Increasing this will speed up execution but requires more resources (default: 1)')
-    parser.add_argument('--proxy', type=bool, default=False, help='Enable proxy support for the solver (Default: False)')    
+    parser.add_argument('--proxy', type=bool, default=False, help='Enable proxy support for the solver (Default: False)')
     parser.add_argument('--host', type=str, default='127.0.0.1', help='Specify the IP address where the API solver runs. (Default: 127.0.0.1)')
     parser.add_argument('--port', type=str, default='5000', help='Set the port for the API solver to listen on. (Default: 5000)')
     return parser.parse_args()
