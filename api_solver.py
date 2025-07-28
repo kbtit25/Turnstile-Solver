@@ -352,10 +352,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Turnstile API Server")
 
     parser.add_argument('--no-sandbox', action='store_true', help='(For Colab/Docker) Add --no-sandbox flag to browser launch arguments.')
-    
-    # 【核心修复】将 headless 改回 action='store_true'，这是一个正确的布尔开关用法
     parser.add_argument('--headless', action='store_true', help='Run the browser in headless mode.')
-    
     parser.add_argument('--useragent', type=str, default=None, help='Specify a custom User-Agent string for the browser.')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode for additional logging.')
     parser.add_argument('--browser_type', type=str, default='camoufox', help='Specify the browser type. (Default: camoufox)')
