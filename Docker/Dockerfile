@@ -1,51 +1,40 @@
-FROM ubuntu:latest
+# 使用一个更精简的Ubuntu基础镜像
+FROM ubuntu:22.04
 
+# 设置环境变量，避免安装过程中的交互提示
 ENV DEBIAN_FRONTEND=noninteractive
-ENV LANG=en_US.UTF-8
-ENV LANGUAGE=en_US:en
-ENV LC_ALL=en_US.UTF-8
-ENV TZ=America/New_York
-ENV RUN_API_SOLVER=false
 
-
-RUN apt-get update && \
-    apt-get -y upgrade && \
-    apt-get install -y --no-install-recommends tzdata locales
-
-RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-RUN echo "LC_ALL=en_US.UTF-8" >> /etc/environment
-RUN echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
-RUN echo "LANG=en_US.UTF-8" > /etc/locale.conf
-RUN locale-gen en_US.UTF-8
-
+# 更新系统并安装最核心的依赖
+# 我们删除了所有xrdp和xfce4相关的包，只保留xvfb
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
-    screen \
-    sudo \
-    xrdp \
-    xfce4 \
-    xorgxrdp \
-    dbus-x11 \
-    xfce4-terminal \
     python3-pip \
+    python3-venv \
     ca-certificates \
-    xvfb
+    xvfb \
+    google-chrome-stable && \
+    # 清理缓存
+    rm -rf /var/cache/apt /var/lib/apt/lists/*
 
-RUN apt remove -y light-locker xscreensaver && \
-    apt autoremove -y && \
-    rm -rf /var/cache/apt /var/lib/apt/lists
+# 将项目代码克隆到镜像里
+RUN git clone https://github.com/Theyka/Turnstile-Solver.git /app
 
-RUN apt-get update && \
-    wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
-    apt-get install -y ./google-chrome-stable_current_amd64.deb && \
-    rm ./google-chrome-stable_current_amd64.deb
+# 设置工作目录
+WORKDIR /app
 
-COPY ./run.sh /usr/bin/
-RUN chmod +x /usr/bin/run.sh
+# 安装Python依赖
+RUN pip3 install -r requirements.txt --break-system-packages
 
-EXPOSE 3389
-ENTRYPOINT ["/usr/bin/run.sh"]
+# 下载Camoufox浏览器
+RUN python3 -m camoufox fetch
+
+# 暴露API端口
+EXPOSE 5000
+
+# 最终的、完美的启动命令！
+# 使用xvfb-run来包裹python3命令，并接收外部传入的参数
+ENTRYPOINT ["xvfb-run", "-a", "python3", "api_solver.py", "--host", "0.0.0.0"]
+CMD ["--browser_type", "camoufox", "--thread", "4"]
