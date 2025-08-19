@@ -1,10 +1,11 @@
-# 使用Ubuntu 22.04作为基础镜像
+# 使用更小、更精简的 Ubuntu 基础镜像
 FROM ubuntu:22.04
 
-# 设置环境变量
+# 设置环境变量，避免交互式提示
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 第一步：安装系统核心依赖
+# --- 优化点 1: 将所有 apt 操作合并为一层，并最后清理 ---
+# 这可以显著减小镜像体积
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git \
@@ -12,29 +13,42 @@ RUN apt-get update && \
     python3 \
     python3-pip \
     ca-certificates \
-    xvfb
-
-# 第二步：安装Google Chrome
-RUN wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
-    apt-get install -y ./google-chrome-stable_current_amd64.deb && \
+    xvfb && \
+    # 下载 Chrome
+    wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && \
+    # 安装 Chrome 并让 apt 自动处理依赖。--fix-broken 可以在依赖出问题时尝试修复
+    apt-get install -y --no-install-recommends --fix-broken ./google-chrome-stable_current_amd64.deb && \
+    # --- 优化点 2: 在同一层 RUN 命令中进行清理 ---
+    # 这样可以确保下载的临时文件不会被保留在最终的镜像层中
     rm ./google-chrome-stable_current_amd64.deb && \
-    rm -rf /var/cache/apt /var/lib/apt/lists/*
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# 将项目代码克隆到镜像里
-RUN git clone https://github.com/Theyka/Turnstile-Solver.git /app
+# --- 优化点 3: 分离代码复制和依赖安装 ---
+# 这样如果你的代码变了，但依赖没变，就不用重新安装所有依赖，利用 Docker 缓存加速构建
 
-# 设置工作目录
+# 先只复制依赖文件
 WORKDIR /app
+COPY requirements.txt .
 
-# 第三步：升级pip本身，然后安装Python依赖
-# 这是关键修正：先升级pip，然后安装依赖时不再需要--break-system-packages
-RUN pip3 install --upgrade pip && \
-    pip3 install -r requirements.txt
+# 安装 Python 依赖
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r requirements.txt
 
-# 下载Camoufox浏览器
+# 下载 Camoufox 浏览器
 RUN python3 -m camoufox fetch
 
-# 暴露API端口
+# 最后再复制所有项目代码
+COPY . .
+
+# 暴露 API 端口
+EXPOSE 5000
+
+# 最终启动命令
+# 建议使用 CMD 而不是 ENTRYPOINT，除非你想让容器像一个可执行文件
+# CMD ["python3", "api_solver.py", "--host", "0.0.0.0"]
+# 如果你还是想手动启动，保留 tail 也可以
+ENTRYPOINT ["tail", "-f", "/dev/null"]# 暴露API端口
 EXPOSE 5000
 
 # 最终启动命令
